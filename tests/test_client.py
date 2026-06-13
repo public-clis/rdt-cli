@@ -67,3 +67,35 @@ def test_get_more_comments_uses_api_morechildren() -> None:
             "raw_json": 1,
         },
     )
+
+
+def test_post_comment_uses_reddit_comment_payload() -> None:
+    cred = Credential(cookies={"reddit_session": "abc"})
+    with RedditClient(cred) as client:
+        with patch.object(client, "_post", return_value={"json": {"errors": []}}) as mock_post:
+            data = client.post_comment("t3_abc123", "Useful context.")
+
+    assert data == {"json": {"errors": []}}
+    mock_post.assert_called_once_with(
+        "/api/comment",
+        data={
+            "api_type": "json",
+            "thing_id": "t3_abc123",
+            "text": "Useful context.",
+        },
+    )
+
+
+def test_post_comment_raises_on_reddit_api_errors() -> None:
+    cred = Credential(cookies={"reddit_session": "abc"})
+    response = {"json": {"errors": [["BAD_THING", "bad target", "thing_id"]]}}
+
+    with RedditClient(cred) as client:
+        with patch.object(client, "_post", return_value=response):
+            try:
+                client.post_comment("t3_abc123", "Useful context.")
+            except RedditApiError as exc:
+                assert "BAD_THING" in str(exc)
+                assert exc.response == response
+            else:
+                raise AssertionError("expected RedditApiError")

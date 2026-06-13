@@ -6,6 +6,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from click import ClickException
 from click.testing import CliRunner
 
 from rdt_cli import __version__
@@ -593,7 +594,8 @@ class TestResolveFullname:
         from rdt_cli import index_cache
         monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "none.json")
         from rdt_cli.commands.social import _resolve_fullname
-        assert _resolve_fullname("3") is None
+        with pytest.raises(ClickException, match="Index 3 not found in cache"):
+            _resolve_fullname("3")
 
     def test_index_with_cache(self, tmp_path, monkeypatch):
         from rdt_cli import index_cache
@@ -614,6 +616,25 @@ class TestResolveFullname:
         index_cache.save_index([{"id": "ccc", "title": "No fullname"}])
         from rdt_cli.commands.social import _resolve_fullname
         assert _resolve_fullname("1") == "t3_ccc"
+
+
+class TestSocialCommands:
+    def test_comment_missing_cached_index_exits_nonzero(self, tmp_path, monkeypatch):
+        from rdt_cli import index_cache
+        from rdt_cli.auth import Credential
+
+        monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "none.json")
+
+        with patch("rdt_cli.commands.social.require_auth", return_value=Credential(cookies={"reddit_session": "abc"})):
+            with patch("rdt_cli.commands.social.RedditClient") as mock_client_class:
+                mock_client = mock_client_class.return_value.__enter__.return_value
+                mock_client.validate_session.return_value = {"authenticated": True}
+
+                result = runner.invoke(cli, ["comment", "99", "Useful context."])
+
+        assert result.exit_code != 0
+        assert "Index 99 not found in cache" in result.output
+        mock_client.post_comment.assert_not_called()
 
 
 # ── Mocked browse commands ──────────────────────────────────────────
@@ -971,4 +992,3 @@ class TestReadCompact:
         result = runner.invoke(cli, ["show", "--help"])
         assert result.exit_code == 0
         assert "--compact" in result.output
-
