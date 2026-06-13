@@ -133,6 +133,35 @@ class RedditClient:
         """POST request."""
         return self._write_request("POST", url, data=data)
 
+    @staticmethod
+    def _format_api_errors(errors: Any) -> str:
+        """Flatten Reddit's json.errors list into a readable message."""
+        if not isinstance(errors, list):
+            return str(errors)
+
+        messages: list[str] = []
+        for error in errors:
+            if isinstance(error, (list, tuple)):
+                message = ": ".join(str(part) for part in error if part)
+            else:
+                message = str(error)
+            if message:
+                messages.append(message)
+        return "; ".join(messages) or "Reddit API returned an error"
+
+    def _raise_for_api_errors(self, response: Any) -> None:
+        """Raise when an old Reddit API response contains json.errors."""
+        if not isinstance(response, dict):
+            return
+
+        json_response = response.get("json")
+        if not isinstance(json_response, dict):
+            return
+
+        errors = json_response.get("errors")
+        if errors:
+            raise RedditApiError(self._format_api_errors(errors), response=response)
+
     # ── Listing helpers ─────────────────────────────────────────────
 
     @staticmethod
@@ -349,7 +378,16 @@ class RedditClient:
 
     def post_comment(self, parent_fullname: str, text: str) -> dict:
         """Post a comment."""
-        return self._post(COMMENT_URL, data={"parent": parent_fullname, "text": text})
+        response = self._post(
+            COMMENT_URL,
+            data={
+                "api_type": "json",
+                "thing_id": parent_fullname,
+                "text": text,
+            },
+        )
+        self._raise_for_api_errors(response)
+        return response
 
     # ── Subscription feed ───────────────────────────────────────────
 

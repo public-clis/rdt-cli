@@ -12,7 +12,7 @@ from ._common import console, exit_for_error, require_auth, write_delay
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
-def _resolve_fullname(id_or_index: str) -> str | None:
+def _resolve_fullname(id_or_index: str) -> str:
     """Resolve an ID or short-index to a Reddit fullname (t3_xxx).
 
     Accepts:
@@ -31,8 +31,7 @@ def _resolve_fullname(id_or_index: str) -> str | None:
             pid = item.get("id", "")
             if pid:
                 return f"t3_{pid}"
-        console.print(f"[yellow]Index {idx} not found in cache[/yellow]")
-        return None
+        raise click.ClickException(f"Index {idx} not found in cache")
     except ValueError:
         pass
 
@@ -65,8 +64,6 @@ def upvote(id_or_index: str, undo: bool, down: bool) -> None:
         with RedditClient(cred) as client:
             client.validate_session()
             fullname = _resolve_fullname(id_or_index)
-            if not fullname:
-                return
             direction = 0 if undo else (-1 if down else 1)
             action_label = "Unvoted" if undo else ("⬇ Downvoted" if down else "⬆ Upvoted")
             client.vote(fullname, direction=direction)
@@ -94,8 +91,6 @@ def save(id_or_index: str, undo: bool) -> None:
         with RedditClient(cred) as client:
             client.validate_session()
             fullname = _resolve_fullname(id_or_index)
-            if not fullname:
-                return
             if undo:
                 client.unsave_item(fullname)
                 write_delay()
@@ -153,8 +148,6 @@ def comment(id_or_index: str, text: str) -> None:
         with RedditClient(cred) as client:
             client.validate_session()
             fullname = _resolve_fullname(id_or_index)
-            if not fullname:
-                return
             client.post_comment(fullname, text)
         write_delay()
         console.print(f"[green]✅ Comment posted[/green] on {fullname}")
