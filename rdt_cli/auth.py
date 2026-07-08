@@ -10,12 +10,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import time
 from typing import Any
 
-from .constants import CONFIG_DIR, CREDENTIAL_FILE, REQUIRED_COOKIES
+from .constants import (
+    CONFIG_DIR,
+    CREDENTIAL_FILE,
+    ENV_COOKIE,
+    ENV_MODHASH,
+    ENV_SESSION,
+    REQUIRED_COOKIES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +128,56 @@ def clear_credential() -> None:
         CREDENTIAL_FILE.unlink()
 
 
+# ── Environment variable credential ─────────────────────────────────
+
+
+def parse_cookie_header(header: str) -> dict[str, str]:
+    """Parse a raw Cookie header ("a=1; b=2") into a name→value dict.
+
+    Splits each pair on the first '=' only (cookie values such as JWTs may
+    contain '='). Blank segments and nameless pairs are skipped.
+    """
+    cookies: dict[str, str] = {}
+    for part in header.split(";"):
+        name, sep, value = part.strip().partition("=")
+        name = name.strip()
+        if not sep or not name:
+            continue
+        cookies[name] = value.strip()
+    return cookies
+
+
+def extract_env_credential() -> Credential | None:
+    """Build a credential from environment variables (no browser access).
+
+    - RDT_COOKIE  : full raw Cookie header (most robust — carries the whole set)
+    - RDT_SESSION : reddit_session cookie value (convenience; overlays RDT_COOKIE)
+    - RDT_MODHASH : modhash (enables write actions)
+
+    Returned in-memory only; env credentials are never written to disk.
+    """
+    raw = os.getenv(ENV_COOKIE)
+    session = os.getenv(ENV_SESSION)
+    modhash = os.getenv(ENV_MODHASH)
+
+    cookies: dict[str, str] = {}
+    if raw:
+        cookies.update(parse_cookie_header(raw))
+    if session:
+        cookies["reddit_session"] = session.strip()
+    if modhash:
+        cookies["modhash"] = modhash.strip()
+
+    if not cookies:
+        return None
+
+    return Credential(
+        cookies=cookies,
+        source="env",
+        modhash=modhash.strip() if modhash else None,
+    )
+
+
 # ── Browser cookie extraction ───────────────────────────────────────
 
 
@@ -194,12 +252,25 @@ def _extract_direct() -> Credential | None:
 # ── Credential chain ────────────────────────────────────────────────
 
 
-def get_credential() -> Credential | None:
-    """Try saved → browser → return None."""
+def get_credential(*, allow_browser: bool = True) -> Credential | None:
+    """Resolve a credential: env → saved → browser → None.
+
+    Priority order:
+    1. Environment variables (RDT_COOKIE / RDT_SESSION) — non-invasive, highest
+       priority, read fresh each run.
+    2. Saved credential file.
+    3. Browser cookie extraction — invasive (reads the browser's cookie database)
+       and slow, so it is the last resort and is gated behind ``allow_browser``.
+       Public/optional endpoints pass ``allow_browser=False`` to avoid the browser.
+    """
+    cred = extract_env_credential()
+    if cred:
+        return cred
     cred = load_credential()
     if cred:
         return cred
-    cred = extract_browser_credential()
-    if cred:
-        return cred
+    if allow_browser:
+        cred = extract_browser_credential()
+        if cred:
+            return cred
     return None

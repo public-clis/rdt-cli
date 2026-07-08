@@ -30,7 +30,8 @@ def login() -> None:
         console.print(f"[green]✅ Login successful![/green] ({len(cred.cookies)} cookies extracted)")
     else:
         console.print("[red]❌ No Reddit cookies found.[/red]")
-        console.print("  [dim]Please login to reddit.com in your browser first, then retry.[/dim]")
+        console.print("  [dim]Set [bold]RDT_COOKIE[/bold] from your browser's cookie header (see README),[/dim]")
+        console.print("  [dim]or log into reddit.com in your browser, then retry.[/dim]")
 
 
 @click.command()
@@ -92,7 +93,7 @@ def status(as_json: bool, as_yaml: bool) -> None:
         console.print("[yellow]⚠️  Not authenticated[/yellow]")
         if info["error"]:
             console.print(f"  [dim]{info['error']}[/dim]")
-        console.print("  [dim]Use 'rdt login' to extract cookies from your browser[/dim]")
+        console.print("  [dim]Set RDT_COOKIE (see README) or run 'rdt login' to use browser cookies[/dim]")
 
 
 @click.command()

@@ -6,6 +6,11 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".config" / "rdt-cli"
 CREDENTIAL_FILE = CONFIG_DIR / "credential.json"
 
+# ── Environment variables (non-browser credential source) ───────────
+ENV_COOKIE = "RDT_COOKIE"    # raw Cookie header: "a=1; b=2; ..."
+ENV_SESSION = "RDT_SESSION"  # convenience: reddit_session cookie value
+ENV_MODHASH = "RDT_MODHASH"  # optional: modhash (enables write actions)
+
 # ── Base URL ────────────────────────────────────────────────────────
 BASE_URL = "https://www.reddit.com"
 OAUTH_URL = "https://oauth.reddit.com"

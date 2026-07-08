@@ -183,14 +183,22 @@ def require_auth() -> Credential:
     """Get credential or exit with error."""
     cred = get_credential()
     if not cred:
-        console.print("[yellow]⚠️  Not logged in[/yellow]. Use [bold]rdt login[/bold] to authenticate")
+        console.print(
+            "[yellow]⚠️  Not authenticated[/yellow]. Set [bold]RDT_COOKIE[/bold] "
+            "(see README) or run [bold]rdt login[/bold]"
+        )
         sys.exit(1)
     return cred
 
 
 def optional_auth() -> Credential | None:
-    """Get credential if available, or None (for public endpoints)."""
-    return get_credential()
+    """Get a credential if one is already available, else None (for public endpoints).
+
+    Never triggers browser cookie extraction — public commands should not read
+    the browser's cookie database as a side effect. Run `rdt login` once to save
+    a credential if you want authenticated public browsing.
+    """
+    return get_credential(allow_browser=False)
 
 
 def get_client(credential: Credential | None = None) -> RedditClient:
@@ -204,6 +212,9 @@ def run_client_action(credential: Credential | None, action: Callable[[RedditCli
         with get_client(credential) as client:
             return action(client)
     except SessionExpiredError:
+        # An anonymous run should never fall back to invasive browser extraction.
+        if credential is None:
+            raise
         from ..auth import extract_browser_credential
 
         fresh = extract_browser_credential()

@@ -124,12 +124,55 @@ rdt comment 3 "Great post!"           # Comment on result #3
 
 ## Authentication
 
-rdt-cli supports browser cookie extraction to authenticate with Reddit:
+rdt-cli resolves credentials in priority order:
 
-1. **Saved cookies** — loads from `~/.config/rdt-cli/credential.json`
-2. **Browser cookies** — auto-detects installed browsers and extracts cookies (supports Chrome, Firefox, Edge, Brave)
+1. **Environment variables** — `RDT_COOKIE` / `RDT_SESSION` (see below); never touches your browser
+2. **Saved cookies** — loads from `~/.config/rdt-cli/credential.json`
+3. **Browser cookies** — *last resort*: auto-detects installed browsers and extracts cookies (Chrome, Firefox, Edge, Brave)
 
-`rdt login` automatically tries all installed browsers and uses the first one with valid cookies.
+`rdt login` tries the saved credential, then falls back to browser extraction.
+
+> **Public commands run anonymously.** Read-only commands (`popular`, `all`, `sub`, `sub-info`, `user`, `user-posts`, `user-comments`, `search`, `export`, `read`, `show`) never read your browser's cookie database. They use a saved credential if one already exists, otherwise they run unauthenticated. Run `rdt login` once to browse these authenticated (e.g., for NSFW visibility or personalized ranking). Only commands that require an account (`feed`, `saved`, `upvoted`, `upvote`, `save`, `subscribe`, `comment`) fall back to browser cookie extraction.
+
+### Cookies via environment variables (no browser access)
+
+If you'd rather rdt-cli **not read your browser's cookie database**, supply cookies yourself. These take priority over the saved file and browser extraction, and are read fresh each run (never written to disk):
+
+| Variable | Description |
+|---|---|
+| `RDT_COOKIE` | A full raw Cookie header (`name=value; name2=value2; …`) — most robust, carries the whole session set |
+| `RDT_SESSION` | Just the `reddit_session` cookie value (convenience) |
+| `RDT_MODHASH` | Optional `modhash`; enables write actions (vote/save/comment) |
+
+**Getting your cookie manually** — Reddit now requires a browser-established session even for "public" reads (a plain HTTP client is blocked by Reddit's anti-bot), so copy the cookie your browser already has:
+
+1. Open **reddit.com** in your browser — **logged in** (recommended: `reddit_session` lasts weeks and enables write actions) or logged out (anonymous, read-only; the anonymous token expires in ~a day).
+2. Open **DevTools** — `F12` or `⌥⌘I` (macOS) — and select the **Network** tab.
+3. Load `https://www.reddit.com/r/popular.json` (or reload any reddit page).
+4. Click the top request → **Headers** → **Request Headers** → select the whole **`cookie:`** value and copy it.
+   - *Alternative:* **Application/Storage → Cookies → `https://www.reddit.com`** lists cookies individually; the ones that matter are `reddit_session` (logged in) or `token_v2` / `loid` / `edgebucket` (anonymous).
+
+**Setting the env var** — use **single quotes** (the value contains `;`, `=`, `%`):
+
+```bash
+# Recommended: the whole cookie header (zsh — macOS default)
+export RDT_COOKIE='loid=...; edgebucket=...; token_v2=...; reddit_session=...'
+echo "export RDT_COOKIE='...'" >> ~/.zshrc && source ~/.zshrc   # persist
+# bash: append to ~/.bashrc instead of ~/.zshrc
+
+# Or, if you only have the session cookie:
+export RDT_SESSION='<reddit_session value>'
+export RDT_MODHASH='<modhash value>'   # optional — enables voting/commenting
+```
+
+Verify:
+
+```bash
+rdt status        # → ✅ Authenticated (source: env)
+rdt popular -n 5  # → posts
+```
+
+> The logged-in cookie is an account credential — treat it like a password; don't commit or share it (`~/.zshrc` stores it in plaintext).
 
 ### Cookie TTL
 
@@ -149,6 +192,9 @@ After any listing command such as `feed`, `popular`, `all`, `sub`, or `search`, 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OUTPUT` | `auto` | Output format: `json`, `yaml`, `rich`, or `auto` (→ YAML when non-TTY) |
+| `RDT_COOKIE` | — | Raw Cookie header for auth (highest priority, never persisted) — see [Authentication](#authentication) |
+| `RDT_SESSION` | — | `reddit_session` cookie value (convenience) |
+| `RDT_MODHASH` | — | `modhash` value; enables write actions |
 
 ## Rate Limiting & Anti-Detection
 
@@ -367,6 +413,8 @@ rdt-cli 支持浏览器 Cookie 提取来认证 Reddit：
 2. **浏览器 Cookie** — 自动检测已安装浏览器并提取（支持 Chrome、Firefox、Edge、Brave）
 
 Cookie 保存后有效期 **7 天**，超时后自动尝试从浏览器刷新。
+
+> **公开命令匿名运行。** 只读命令（`popular`、`all`、`sub`、`sub-info`、`user`、`user-posts`、`user-comments`、`search`、`export`、`read`、`show`）不会读取浏览器 Cookie 数据库：若已保存凭据则使用之，否则以匿名方式运行。如需登录态浏览（例如查看 NSFW 或个性化排序），先执行一次 `rdt login`。只有需要账号的命令（`feed`、`saved`、`upvoted`、`upvote`、`save`、`subscribe`、`comment`）才会回退到浏览器 Cookie 提取。
 
 ## 常见问题
 
