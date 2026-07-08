@@ -123,6 +123,38 @@ def clear_credential() -> None:
 # ── Browser cookie extraction ───────────────────────────────────────
 
 
+def _chrome_profile_cookie_files() -> list[str]:
+    """Every Chrome/Chromium cookie DB across all profiles.
+
+    Upstream browser_cookie3 reads only the "Default" profile, so a Reddit
+    session living in "Profile 1" etc. is invisible to it. We enumerate all
+    profiles and hand each cookie DB to browser_cookie3 via cookie_file=.
+    """
+    import glob
+    import os
+
+    home = os.path.expanduser("~")
+    bases = [
+        os.path.join(home, "Library", "Application Support", "Google", "Chrome"),  # macOS Chrome
+        os.path.join(home, "Library", "Application Support", "Chromium"),          # macOS Chromium
+        os.path.join(home, ".config", "google-chrome"),                            # Linux Chrome
+        os.path.join(home, ".config", "chromium"),                                 # Linux Chromium
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data"),  # Windows
+    ]
+    files: list[str] = []
+    for base in bases:
+        if not base or not os.path.isdir(base):
+            continue
+        profile_dirs = [os.path.join(base, "Default")]
+        profile_dirs += sorted(glob.glob(os.path.join(base, "Profile *")))
+        for pdir in profile_dirs:
+            for rel in ("Network/Cookies", "Cookies"):
+                f = os.path.join(pdir, rel)
+                if os.path.isfile(f) and f not in files:
+                    files.append(f)
+    return files
+
+
 def extract_browser_credential() -> Credential | None:
     """Extract Reddit cookies from installed browsers.
 
@@ -136,21 +168,48 @@ def extract_browser_credential() -> Credential | None:
 
 
 def _extract_subprocess() -> Credential | None:
-    """Extract via uv subprocess — avoids SQLite lock."""
+    """Extract via uv subprocess — avoids SQLite lock. Scans all Chrome profiles."""
     script = '''
-import browser_cookie3, json
-cookies = {}
-for browser_fn in [browser_cookie3.chrome, browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.brave]:
-    try:
-        jar = browser_fn(domain_name=".reddit.com")
-        for c in jar:
-            cookies[c.name] = c.value
-        if cookies:
-            break
-    except Exception:
+import browser_cookie3, json, glob, os
+home = os.path.expanduser("~")
+bases = [
+    os.path.join(home, "Library", "Application Support", "Google", "Chrome"),
+    os.path.join(home, "Library", "Application Support", "Chromium"),
+    os.path.join(home, ".config", "google-chrome"),
+    os.path.join(home, ".config", "chromium"),
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data"),
+]
+chrome_files = []
+for base in bases:
+    if not base or not os.path.isdir(base):
         continue
-if cookies:
-    print(json.dumps(cookies))
+    pdirs = [os.path.join(base, "Default")] + sorted(glob.glob(os.path.join(base, "Profile *")))
+    for pdir in pdirs:
+        for rel in ("Network/Cookies", "Cookies"):
+            f = os.path.join(pdir, rel)
+            if os.path.isfile(f) and f not in chrome_files:
+                chrome_files.append(f)
+
+def _grab(fn):
+    try:
+        return {c.name: c.value for c in fn()}
+    except Exception:
+        return {}
+
+result = {}
+for f in chrome_files:
+    ck = _grab(lambda f=f: browser_cookie3.chrome(cookie_file=f, domain_name=".reddit.com"))
+    if "reddit_session" in ck:
+        result = ck
+        break
+if not result:
+    for fn in [browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.brave]:
+        ck = _grab(lambda fn=fn: fn(domain_name=".reddit.com"))
+        if "reddit_session" in ck:
+            result = ck
+            break
+if result:
+    print(json.dumps(result))
 '''
     try:
         result = subprocess.run(
@@ -171,19 +230,35 @@ if cookies:
 
 
 def _extract_direct() -> Credential | None:
-    """Fallback direct extraction (may fail if browser is open)."""
+    """Direct extraction — tries every Chrome profile, then other browsers."""
+    import os
+
     try:
         import browser_cookie3
     except ImportError:
         logger.warning("browser-cookie3 not available for direct extraction")
         return None
 
-    for fn in [browser_cookie3.chrome, browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.brave]:
+    def _profile_label(path: str) -> str:
+        d = os.path.dirname(path)
+        if os.path.basename(d) == "Network":
+            d = os.path.dirname(d)
+        return os.path.basename(d)
+
+    attempts = []
+    for f in _chrome_profile_cookie_files():
+        attempts.append(
+            (f"chrome:{_profile_label(f)}",
+             lambda f=f: browser_cookie3.chrome(cookie_file=f, domain_name=".reddit.com"))
+        )
+    for fn in (browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.brave):
+        attempts.append((fn.__name__, lambda fn=fn: fn(domain_name=".reddit.com")))
+
+    for label, getter in attempts:
         try:
-            jar = fn(domain_name=".reddit.com")
-            cookies = {c.name: c.value for c in jar}
+            cookies = {c.name: c.value for c in getter()}
             if any(k in cookies for k in REQUIRED_COOKIES):
-                cred = Credential(cookies=cookies, source=f"browser:{fn.__name__}")
+                cred = Credential(cookies=cookies, source=f"browser:{label}")
                 save_credential(cred)
                 return cred
         except Exception:
