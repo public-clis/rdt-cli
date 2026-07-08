@@ -53,7 +53,8 @@ class SessionState:
 
     def refresh_capabilities(self) -> None:
         capabilities: set[str] = set()
-        if self.cookies.get("reddit_session"):
+        # reddit_session → logged-in read; token_v2 → anonymous session read.
+        if self.cookies.get("reddit_session") or self.cookies.get("token_v2"):
             capabilities.add("read")
 
         inferred_modhash = self.modhash or _cookie_value(self.cookies, "modhash", "csrf_token")
