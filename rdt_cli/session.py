@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -62,6 +63,22 @@ class SessionState:
             capabilities.add("write")
 
         self.capabilities = capabilities
+
+    def ensure_csrf_token(self) -> str:
+        """Return a csrf_token for GraphQL writes, generating one if absent.
+
+        Reddit's web GraphQL uses a double-submit CSRF token: the same value
+        must appear in both the request cookie and the JSON body, and it may be
+        client-generated (only ``reddit_session`` must be a real login cookie).
+        Prefer an existing ``csrf_token`` cookie so we match the browser; fall
+        back to a fresh token otherwise.
+        """
+        token = self.cookies.get("csrf_token")
+        if not token:
+            token = secrets.token_hex(16)
+            self.cookies["csrf_token"] = token
+            self.refresh_capabilities()
+        return token
 
     def apply_identity(self, identity: dict[str, Any]) -> None:
         """Update session from a validated identity payload."""

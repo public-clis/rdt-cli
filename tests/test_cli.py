@@ -37,6 +37,7 @@ class TestCliBasic:
             "read", "show",
             "search", "export",
             "upvote", "save", "subscribe", "comment",
+            "post",
         ]
         for cmd in expected:
             assert cmd in result.output, f"Missing command: {cmd}"
@@ -52,7 +53,7 @@ class TestCliBasic:
         # Count command lines (indented, after "Commands:" )
         lines = result.output.split("\n")
         cmd_lines = [line for line in lines if line.startswith("  ") and not line.strip().startswith("-")]
-        assert len(cmd_lines) >= 22
+        assert len(cmd_lines) >= 23
 
 
 # ── Command help ────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ class TestCommandHelp:
             "read", "show",
             "search", "export",
             "upvote", "save", "subscribe", "comment",
+            "post",
         ],
     )
     def test_help(self, cmd):
@@ -971,4 +973,243 @@ class TestReadCompact:
         result = runner.invoke(cli, ["show", "--help"])
         assert result.exit_code == 0
         assert "--compact" in result.output
+
+
+# ── Post creation command (mocked) ──────────────────────────────────
+
+
+class TestPostCommand:
+    """Test the `post` creation command with mocked client methods."""
+
+    def _cred(self):
+        from rdt_cli.auth import Credential
+
+        return Credential(cookies={"reddit_session": "x", "csrf_token": "y"}, username="me")
+
+    def test_text_draft(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch(
+                 "rdt_cli.client.RedditClient.create_draft",
+                 return_value={"createPostDraft": {"ok": True, "postDraft": {"id": "d-123"}}},
+             ) as mock_draft, \
+             patch("rdt_cli.client.RedditClient.create_post") as mock_post:
+            result = runner.invoke(cli, ["post", "test", "WIP", "--text", "body", "--draft", "--json"])
+            assert result.exit_code == 0, result.output
+            data = json.loads(result.output)
+            assert data["data"]["action"] == "draft"
+            assert data["data"]["draft_id"] == "d-123"
+            _, kwargs = mock_draft.call_args
+            assert kwargs["body"] == "body"
+            mock_post.assert_not_called()
+
+    def test_link_draft(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch("rdt_cli.client.RedditClient.create_draft", return_value={}) as mock_draft:
+            result = runner.invoke(
+                cli, ["post", "test", "A link", "--url", "https://example.com", "--draft", "--json"]
+            )
+            assert result.exit_code == 0, result.output
+            _, kwargs = mock_draft.call_args
+            assert kwargs["url"] == "https://example.com"
+
+    def test_publish_requires_recaptcha_token(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(cli, ["post", "test", "T", "--text", "hi"])
+            assert result.exit_code == 2
+            assert "reCAPTCHA" in result.output
+
+    def test_text_publish_with_token(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(
+                cli, ["post", "test", "T", "--text", "hi", "--recaptcha-token", "TOK", "--json"]
+            )
+            assert result.exit_code == 0, result.output
+            _, kwargs = mock_post.call_args
+            assert kwargs["kind"] == "self"
+            assert kwargs["recaptcha_token"] == "TOK"
+            assert kwargs["is_profile"] is False
+
+    def test_image_publish_with_token(self, tmp_path):
+        cred = self._cred()
+        img = tmp_path / "pic.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_abc"), \
+             patch("rdt_cli.client.RedditClient.upload_image", return_value="media123") as mock_up, \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(
+                cli, ["post", "test", "Pic", "--image", str(img), "--recaptcha-token", "TOK", "--json"]
+            )
+            assert result.exit_code == 0, result.output
+            mock_up.assert_called_once_with(str(img))
+            _, kwargs = mock_post.call_args
+            assert kwargs["kind"] == "image"
+            assert kwargs["media_id"] == "media123"
+
+    def test_profile_publish_uses_profile_flag(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred), \
+             patch("rdt_cli.commands.submit.write_delay"), \
+             patch("rdt_cli.client.RedditClient.validate_session", return_value={}), \
+             patch("rdt_cli.client.RedditClient.resolve_subreddit_id", return_value="t5_prof"), \
+             patch("rdt_cli.client.RedditClient.create_post", return_value={}) as mock_post:
+            result = runner.invoke(
+                cli, ["post", "u_me", "T", "--text", "hi", "--recaptcha-token", "TOK", "--json"]
+            )
+            assert result.exit_code == 0, result.output
+            _, kwargs = mock_post.call_args
+            assert kwargs["is_profile"] is True
+
+    def test_requires_a_kind(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(cli, ["post", "test", "No body", "--draft"])
+            assert result.exit_code == 2
+            assert "exactly one" in result.output
+
+    def test_rejects_two_kinds(self):
+        cred = self._cred()
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(
+                cli, ["post", "test", "Two", "--text", "a", "--url", "https://e.com", "--draft"]
+            )
+            assert result.exit_code == 2
+            assert "exactly one" in result.output
+
+    def test_rejects_image_draft(self, tmp_path):
+        cred = self._cred()
+        img = tmp_path / "pic.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            result = runner.invoke(cli, ["post", "test", "Pic", "--image", str(img), "--draft"])
+            assert result.exit_code == 2
+            assert "draft" in result.output.lower()
+
+    def test_not_logged_in(self):
+        with patch("rdt_cli.commands._common.get_credential", return_value=None):
+            result = runner.invoke(cli, ["post", "test", "Title", "--text", "hi", "--draft"])
+            assert result.exit_code == 1
+
+
+# ── Client post-creation methods (mocked) ───────────────────────────
+
+
+class TestClientPostMethods:
+    def _client(self):
+        from rdt_cli.auth import Credential
+        from rdt_cli.client import RedditClient
+
+        cred = Credential(cookies={"reddit_session": "x", "csrf_token": "tok"})
+        return RedditClient(cred)
+
+    def test_graphql_sends_operation_and_csrf(self):
+        captured = {}
+
+        def fake_write(method, url, **kwargs):
+            captured.update(method=method, url=url, json=kwargs.get("json"))
+            return {"data": {"ok": True}}
+
+        with self._client() as client:
+            with patch.object(client, "_write_request", side_effect=fake_write):
+                data = client._graphql("CreatePost", {"input": {"a": 1}})
+        assert data == {"ok": True}
+        assert captured["url"].endswith("/svc/shreddit/graphql")
+        body = captured["json"]
+        assert body["operation"] == "CreatePost"
+        assert body["variables"] == {"input": {"a": 1}}
+        assert body["csrf_token"] == "tok"
+
+    def test_graphql_raises_on_errors(self):
+        from rdt_cli.exceptions import RedditApiError
+
+        def fake_write(*a, **k):
+            return {"data": None, "errors": [{"message": "boom"}]}
+
+        with self._client() as client:
+            with patch.object(client, "_write_request", side_effect=fake_write):
+                with pytest.raises(RedditApiError, match="boom"):
+                    client._graphql("CreatePost", {})
+
+    def test_resolve_subreddit_id(self):
+        with self._client() as client:
+            with patch.object(
+                client, "get_subreddit_about", return_value={"name": "t5_2qh1i", "display_name": "test"}
+            ):
+                assert client.resolve_subreddit_id("test") == "t5_2qh1i"
+
+    def test_create_draft_payload(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={"createDraft": {"ok": True}}) as g:
+                client.create_draft("t5_x", "Title", body="hello")
+                op, variables = g.call_args.args
+                assert op == "CreateDraft"
+                inp = variables["input"]
+                assert inp["subredditId"] == "t5_x"
+                assert inp["title"] == "Title"
+                assert inp["kind"] == "MARKDOWN"
+                assert inp["content"] == {"markdown": "hello"}
+
+    def test_create_post_link_payload(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post("t5_x", "T", recaptcha_token="TOK", kind="link", url="https://e.com")
+                op, variables = g.call_args.args
+                assert op == "CreatePost"
+                inp = variables["input"]
+                assert inp["postType"] == "LINK"
+                assert inp["url"] == "https://e.com"
+                assert inp["recaptchaToken"] == "TOK"
+                assert "correlationId" in inp
+
+    def test_create_profile_post_image_payload(self):
+        with self._client() as client:
+            with patch.object(client, "_graphql", return_value={}) as g:
+                client.create_post(
+                    "t5_prof", "T", recaptcha_token="TOK", kind="image",
+                    media_id="mid42", is_profile=True,
+                )
+                op, variables = g.call_args.args
+                assert op == "CreateProfilePost"
+                inp = variables["input"]
+                assert inp["image"]["url"].endswith("/mid42")
+                assert inp["recaptchaToken"] == "TOK"
+                assert "subredditId" not in inp  # profile posts omit subredditId
+
+    def test_upload_image(self, tmp_path):
+        img = tmp_path / "pic.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        lease = {
+            "mediaId": "media123",
+            "uploadLease": {
+                "uploadLeaseUrl": "https://s3.example/",
+                "uploadLeaseHeaders": [{"header": "key", "value": "abc"}],
+            },
+        }
+        with self._client() as client:
+            with patch.object(client, "create_media_lease", return_value=lease) as mock_lease:
+                with patch("httpx.Client.post") as mock_s3:
+                    mock_s3.return_value.status_code = 201
+                    media_id = client.upload_image(str(img))
+        assert media_id == "media123"
+        mock_lease.assert_called_once_with("PNG")
+        # S3 upload sends lease fields + file, no reddit cookies
+        _, kwargs = mock_s3.call_args
+        assert kwargs["data"] == {"key": "abc"}
+        assert "file" in kwargs["files"]
 

@@ -17,7 +17,7 @@ import logging
 import click
 
 from . import __version__
-from .commands import auth, browse, post, search, social
+from .commands import auth, browse, post, search, social, submit
 
 
 @click.group()
@@ -70,6 +70,10 @@ cli.add_command(social.upvote)
 cli.add_command(social.save)
 cli.add_command(social.subscribe)
 cli.add_command(social.comment)
+
+# ─── Create commands ────────────────────────────────────────────────
+
+cli.add_command(submit.post)
 
 
 if __name__ == "__main__":

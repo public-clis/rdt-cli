@@ -73,7 +73,7 @@ Payloads live under `.data`.
 - `--output file.json` → save structured output to file
 - Rich output → **stderr** (safe for pipes: `rdt search X --json | jq .data`)
 - Most read commands work without auth (public Reddit JSON API)
-- Write actions (upvote, save, subscribe) require auth + built-in 1.5-4s delay
+- Write actions (upvote, save, subscribe, comment, post) require auth + built-in 1.5-4s delay
 
 ## Command Reference
 
@@ -125,6 +125,21 @@ Payloads live under `.data`.
 | `rdt subscribe <sub>` | Subscribe | `rdt subscribe python` |
 | `rdt subscribe <sub> --undo` | Unsubscribe | `rdt subscribe python --undo` |
 | `rdt comment <id> <text>` | Post a comment | `rdt comment 3 "Great post!"` |
+
+### Create posts (require auth)
+
+Exactly one of `--text` / `--url` / `--image`. Target a subreddit or a profile (`u_<name>`). Add `--json` for a structured result.
+
+**Drafts** save headlessly. **Publishing** is gated behind reCAPTCHA Enterprise (invisible, score-based) — it needs a `--recaptcha-token` captured from a browser (single-use, ~2 min). rdt-cli never solves the captcha.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `rdt post <sub> <title> --text <body> --draft` | Save a text draft | `rdt post python "WIP" --text "..." --draft` |
+| `rdt post <sub> <title> --url <url> --draft` | Save a link draft | `rdt post news "Read" --url https://ex.com --draft` |
+| `rdt post <sub> <title> --text <body> --recaptcha-token <tok>` | Publish text post | `rdt post python "Hi" --text "..." --recaptcha-token <tok>` |
+| `rdt post <sub> <title> --image <file> --recaptcha-token <tok>` | Publish image post | `rdt post pics "Cat" --image cat.jpg --recaptcha-token <tok>` |
+
+Optional flags: `--nsfw`, `--spoiler`. Notes: Reddit drafts can't store images (text/link only); `--image` requires publishing with a token.
 
 ### Account
 

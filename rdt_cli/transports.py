@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import ssl
 import time
 from typing import Any
 
@@ -22,6 +23,24 @@ from .fingerprint import BrowserFingerprint
 from .session import SessionState
 
 logger = logging.getLogger(__name__)
+
+
+def build_ssl_context() -> ssl.SSLContext:
+    """SSL context whose TLS fingerprint Reddit's WAF accepts.
+
+    httpx/httpcore ship a curated, restricted cipher list. The resulting
+    ClientHello fingerprint is rejected (HTTP 403 "blocked by network security")
+    by Reddit's edge on POST /svc/shreddit/graphql — while reads and the legacy
+    /api/* endpoints are unaffected. Python's stock cipher set passes, so we
+    build a default context and reset it to OpenSSL's DEFAULT ciphers. Cert
+    verification is preserved.
+    """
+    context = ssl.create_default_context()
+    context.set_ciphers("DEFAULT")
+    return context
+
+
+SSL_CONTEXT = build_ssl_context()
 
 
 class BaseTransport:
@@ -48,6 +67,7 @@ class BaseTransport:
             cookies=session.cookies,
             follow_redirects=True,
             timeout=httpx.Timeout(config.timeout),
+            verify=SSL_CONTEXT,
         )
 
     def close(self) -> None:
@@ -161,10 +181,16 @@ class WriteTransport(BaseTransport):
 
         headers = dict(kwargs.pop("headers", {}))
         headers.update(self.fingerprint.write_headers(modhash=self.session.modhash))
+
+        if "json" in kwargs:
+            # GraphQL / JSON writes (svc/shreddit/graphql): send application/json
+            # and do not inject the form-style `uh` modhash. CSRF is carried in
+            # the JSON body + cookie by the caller.
+            headers["Content-Type"] = "application/json"
+        else:
+            data = kwargs.get("data")
+            if isinstance(data, dict) and self.session.modhash and "uh" not in data:
+                kwargs["data"] = {**data, "uh": self.session.modhash}
+
         kwargs["headers"] = headers
-
-        data = kwargs.get("data")
-        if isinstance(data, dict) and self.session.modhash and "uh" not in data:
-            kwargs["data"] = {**data, "uh": self.session.modhash}
-
         return super().request(method, url, **kwargs)

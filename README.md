@@ -28,6 +28,7 @@ A CLI for Reddit — browse feeds, read posts, search, and interact via reverse-
 - 📤 **Export** — export search results to CSV or JSON; `-o file.json` on any listing
 - 👤 **Users** — view user profiles, post history, comment history, saved and upvoted items
 - ⬆️ **Interactions** — upvote/downvote, save/unsave, subscribe/unsubscribe, comment (with 1.5-4s rate-limit delay)
+- ✍️ **Create posts** — save text/link **drafts** headlessly (`rdt post --draft`); publishing is reCAPTCHA-gated and needs a browser token (`--recaptcha-token`)
 - 🛡️ **Anti-detection** — consistent Chrome 133 fingerprint, `sec-ch-ua` alignment, Gaussian jitter, exponential backoff
 - 📊 **Structured output** — `--yaml`, `--json`, `--output FILE`, `--compact`, `--full-text`
 - 📦 **Stable envelope** — see [SCHEMA.md](./SCHEMA.md) for `ok/schema_version/data/error`
@@ -120,7 +121,20 @@ rdt save 3 --undo                     # Unsave
 rdt subscribe python                  # Subscribe to r/python
 rdt subscribe python --undo           # Unsubscribe
 rdt comment 3 "Great post!"           # Comment on result #3
+
+# ─── Create posts (require login) ─────────────────
+# Drafts save headlessly. Publishing is gated behind reCAPTCHA Enterprise, so it
+# needs a --recaptcha-token captured from a browser (single-use, ~2 min).
+rdt post python "WIP title" --text "Hello **world**" --draft   # Save a text draft
+rdt post news "Cool read" --url https://example.com --draft    # Save a link draft
+rdt post python "Title" --text "body" --recaptcha-token <tok>  # Publish text post
+rdt post pics "My cat" --image cat.jpg --recaptcha-token <tok> # Publish image post
+rdt post u_yourname "On my profile" --text "hi" --recaptcha-token <tok>
 ```
+
+> **Note:** Reddit drafts store text/link only — not images (image drafts aren't
+> supported by Reddit). And publishing any post requires a reCAPTCHA Enterprise
+> token that only a browser can produce; rdt-cli never solves the captcha.
 
 ## Authentication
 
@@ -219,7 +233,8 @@ rdt_cli/
     ├── browse.py         # feed, popular, all, sub, sub-info, user, user-posts, user-comments, saved, upvoted, open
     ├── post.py           # read, show
     ├── search.py         # search, export
-    └── social.py         # upvote, save, subscribe, comment
+    ├── social.py         # upvote, save, subscribe, comment
+    └── submit.py         # post (text/link/image, drafts)
 ```
 
 ## Development

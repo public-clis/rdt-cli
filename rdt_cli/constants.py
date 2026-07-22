@@ -51,6 +51,30 @@ SUBSCRIBE_URL = "/api/subscribe"
 COMMENT_URL = "/api/comment"
 SUBSCRIPTIONS_URL = "/subreddits/mine/subscriber.json"
 
+# ── Post creation (Reddit web GraphQL) ──────────────────────────────
+# Modern Reddit ("shreddit") creates posts/drafts and leases media uploads
+# through a single GraphQL endpoint on www.reddit.com. JSON body is
+# {operation, variables, csrf_token}; csrf_token is double-submit (same value
+# in the cookie jar and the body). See rdt_cli.client for the flow.
+GRAPHQL_URL = "/svc/shreddit/graphql"
+OP_CREATE_POST = "CreatePost"              # subreddit posts
+OP_CREATE_PROFILE_POST = "CreateProfilePost"  # posts to u_<username> profile
+OP_CREATE_DRAFT = "CreateDraft"
+OP_MEDIA_LEASE = "CreateMediaUploadLease"
+
+# S3 host that serves uploaded media; the object URL is "<host>/<mediaId>".
+MEDIA_S3_HOST = "https://reddit-uploaded-media.s3-accelerate.amazonaws.com"
+
+# Image posts: allowed content types (extension → MIME). The lease token sent
+# to Reddit is the uppercased subtype (e.g. image/jpeg → "JPEG"); the actual S3
+# upload URL and fields come from the lease response.
+IMAGE_MIME_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+}
+
 # ── Request Headers (Chrome 133, macOS) ─────────────────────────────
 HEADERS = {
     "User-Agent": (
