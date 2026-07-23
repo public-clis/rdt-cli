@@ -7,7 +7,7 @@ Usage:
     rdt search <query> / export <query>
     rdt user <username> / user-posts <username> / user-comments <username>
     rdt saved / upvoted
-    rdt upvote / save / subscribe / comment
+    rdt upvote / save / subscribe / comment / delete
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import logging
 import click
 
 from . import __version__
-from .commands import auth, browse, post, search, social
+from .commands import auth, browse, post, search, social, submit
 
 
 @click.group()
@@ -47,6 +47,7 @@ cli.add_command(browse.popular)
 cli.add_command(browse.all_cmd)
 cli.add_command(browse.sub)
 cli.add_command(browse.sub_info)
+cli.add_command(browse.rules)
 cli.add_command(browse.user)
 cli.add_command(browse.user_posts)
 cli.add_command(browse.user_comments)
@@ -70,6 +71,12 @@ cli.add_command(social.upvote)
 cli.add_command(social.save)
 cli.add_command(social.subscribe)
 cli.add_command(social.comment)
+cli.add_command(social.delete)
+
+# ─── Create commands ────────────────────────────────────────────────
+
+cli.add_command(submit.post)
+cli.add_command(submit.flairs)
 
 
 if __name__ == "__main__":

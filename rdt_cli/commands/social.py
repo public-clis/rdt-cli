@@ -108,6 +108,41 @@ def save(id_or_index: str, undo: bool) -> None:
         exit_for_error(exc, prefix="Save failed")
 
 
+# ── delete ──────────────────────────────────────────────────────────
+
+
+@click.command()
+@click.argument("id_or_index")
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt")
+def delete(id_or_index: str, yes: bool) -> None:
+    """Delete your own post or comment (by ID or index number)
+
+    Irreversible; only works on things submitted by the logged-in
+    account. A bare ID is assumed to be a post — pass a t1_ fullname
+    to delete a comment.
+
+    Examples:
+      rdt delete 3              # delete result #3 (asks to confirm)
+      rdt delete 1abc123 -y     # delete a post by ID, no prompt
+      rdt delete t1_abc123 -y   # delete a comment by fullname
+    """
+    cred = require_auth()
+    fullname = _resolve_fullname(id_or_index)
+    if not fullname:
+        return
+    if not yes and not click.confirm(f"Delete {fullname}? This cannot be undone"):
+        console.print("[dim]Aborted.[/dim]")
+        return
+    try:
+        with RedditClient(cred) as client:
+            client.validate_session()
+            client.delete_item(fullname)
+        write_delay()
+        console.print(f"[green]✅ Deleted[/green] {fullname}")
+    except RedditApiError as exc:
+        exit_for_error(exc, prefix="Delete failed")
+
+
 # ── subscribe / unsubscribe ────────────────────────────────────────
 
 

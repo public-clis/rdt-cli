@@ -73,7 +73,7 @@ Payloads live under `.data`.
 - `--output file.json` → save structured output to file
 - Rich output → **stderr** (safe for pipes: `rdt search X --json | jq .data`)
 - Most read commands work without auth (public Reddit JSON API)
-- Write actions (upvote, save, subscribe) require auth + built-in 1.5-4s delay
+- Write actions (upvote, save, subscribe, comment, delete, post) require auth + built-in 1.5-4s delay
 
 ## Command Reference
 
@@ -87,6 +87,7 @@ Payloads live under `.data`.
 | `rdt all` | Browse /r/all | `rdt all -n 10 --compact --json` |
 | `rdt sub <name>` | Browse a subreddit | `rdt sub python -s top -t week` |
 | `rdt sub-info <name>` | View subreddit info | `rdt sub-info rust --json` |
+| `rdt rules <name>` | View subreddit rules | `rdt rules rust --json` |
 | `rdt user <name>` | View user profile | `rdt user spez --json` |
 | `rdt user-posts <name>` | View user's posts | `rdt user-posts spez -n 5 --json` |
 | `rdt user-comments <name>` | View user's comments | `rdt user-comments spez -n 5 --json` |
@@ -125,6 +126,28 @@ Payloads live under `.data`.
 | `rdt subscribe <sub>` | Subscribe | `rdt subscribe python` |
 | `rdt subscribe <sub> --undo` | Unsubscribe | `rdt subscribe python --undo` |
 | `rdt comment <id> <text>` | Post a comment | `rdt comment 3 "Great post!"` |
+| `rdt delete <id> -y` | Delete your own post/comment (irreversible; `-y` skips the prompt; use `t1_<id>` for comments) | `rdt delete 1abc123 -y` |
+
+### Create posts (require auth)
+
+Exactly one of `--text` / `--url` / `--image`. Target a subreddit or a profile (`u_<name>`). Add `--json` for a structured result.
+
+**Drafts** save headlessly. **Publishing** is gated behind reCAPTCHA Enterprise (invisible, score-based). Token sources, checked in order: `--recaptcha-token` captured from a browser (single-use, ~2 min), else automatic solving via solvecaptcha.com when a Solvecaptcha API key is configured — env `RDT_SOLVECAPTCHA_API_KEY` / `APIKEY_SOLVECAPTCHA`, or `solvecaptcha_api_key` in `~/.config/rdt-cli/config.json`. The key's presence opts in to a paid solve (~10-60s) right before publishing.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `rdt post <sub> <title> --text <body> --draft` | Save a text draft | `rdt post python "WIP" --text "..." --draft` |
+| `rdt post <sub> <title> --url <url> --draft` | Save a link draft | `rdt post news "Read" --url https://ex.com --draft` |
+| `rdt post <sub> <title> --text <body> --recaptcha-token <tok>` | Publish text post (browser token) | `rdt post python "Hi" --text "..." --recaptcha-token <tok>` |
+| `rdt post <sub> <title> --image <file>` | Publish image post (captcha auto-solved if key set) | `rdt post pics "Cat" --image cat.jpg` |
+| `rdt post <sub> <title> --text <body> --embed <file>` | Text post with inline image(s) | `rdt post python "Guide" --text "step 1 ![img]" --embed s1.jpg` |
+| `rdt post <sub> <title> --text <body> --image <file>` | Text post + attached image (after body, no caption) | `rdt post python "Report" --text "summary" --image chart.png` |
+| `rdt flairs <sub>` | List post flair templates (id + text) | `rdt flairs askscience` |
+| `rdt post <sub> <title> … --flair-id <id>` | Publish with post flair (required by some subs; `--flair-text` for editable templates) | `rdt post askscience "Q" --text "…" --flair-id abc-123` |
+
+Flair gotcha: a template with empty default text applies fine but renders as a blank label — pass `--flair-text` with it (the `rdt flairs` listing flags such templates).
+
+Optional flags: `--nsfw`, `--spoiler`. Notes: Reddit drafts can't store images (text/link only); `--image` requires publishing with a token (flag or solver); `--embed` may combine with `--image`: the attachment becomes the feed-card image and also renders after the body in the opened post (inline embeds render in place there) — attach a distinct image to avoid an in-post duplicate. `--embed` needs one `![img]` marker per file in `--text` (substituted in order). On publish with embeds the body goes out as RTJSON (`content.richText`, replacing markdown; without embeds it stays `content.markdown`): New Reddit renders true inline image blocks with captions. Keep `--text` plain when embedding (markdown formatting isn't translated to RTJSON and shows literally). Drafts are markdown-only — embeds stay `https://i.redd.it/<id>.<ext>` links there. Feed visibility: `--embed` images show only inside the opened post (feed cards show text only); an attached `--image` also shows on feed/list cards — choose by whether feed visibility or inline placement/captions matters more.
 
 ### Account
 
@@ -237,7 +260,7 @@ Structured error codes returned in the `error.code` field (see [SCHEMA.md](./SCH
 ## Anti-Detection Notes for Agents
 
 - **Do NOT parallelize requests** — the built-in rate-limit delay is for account safety
-- **Write operation delay**: 1.5-4s random delay after each write (upvote/save/subscribe/comment)
+- **Write operation delay**: 1.5-4s random delay after each write (upvote/save/subscribe/comment/delete)
 - **Batch operations**: add delays between CLI calls when doing bulk work
 - **Chrome 133 fingerprint**: all requests use consistent browser identity
 - **Exponential backoff**: 429/5xx errors are auto-retried with backoff

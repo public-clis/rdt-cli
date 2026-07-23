@@ -323,6 +323,45 @@ def sub_info(subreddit: str, as_json: bool, as_yaml: bool) -> None:
     )
 
 
+# ── rules ───────────────────────────────────────────────────────────
+
+
+@click.command()
+@click.argument("subreddit")
+@structured_output_options
+def rules(subreddit: str, as_json: bool, as_yaml: bool) -> None:
+    """View a subreddit's rules"""
+    cred = optional_auth()
+
+    _KIND_LABELS = {"link": "posts", "comment": "comments", "all": "posts & comments"}
+
+    def _render(data: dict) -> None:
+        rule_list = data.get("rules", [])
+        if not rule_list:
+            console.print(f"[dim]r/{subreddit} has no community rules.[/dim]")
+            return
+
+        lines = []
+        for i, rule in enumerate(rule_list, 1):
+            name = rule.get("short_name") or rule.get("violation_reason") or f"Rule {i}"
+            kind = _KIND_LABELS.get(rule.get("kind", ""), "")
+            kind_tag = f" [dim]({kind})[/dim]" if kind else ""
+            lines.append(f"[bold cyan]{i}. {name}[/bold cyan]{kind_tag}")
+            desc = (rule.get("description") or "").strip()
+            if desc:
+                lines.append(f"[dim]{desc}[/dim]")
+            lines.append("")
+
+        panel = Panel("\n".join(lines).rstrip(), title=f"📜 r/{subreddit} rules", border_style="cyan")
+        console.print(panel)
+
+    handle_command(
+        cred,
+        action=lambda c: c.get_subreddit_rules(subreddit),
+        render=_render, as_json=as_json, as_yaml=as_yaml,
+    )
+
+
 # ── user ────────────────────────────────────────────────────────────
 
 

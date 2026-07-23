@@ -28,6 +28,7 @@ A CLI for Reddit — browse feeds, read posts, search, and interact via reverse-
 - 📤 **Export** — export search results to CSV or JSON; `-o file.json` on any listing
 - 👤 **Users** — view user profiles, post history, comment history, saved and upvoted items
 - ⬆️ **Interactions** — upvote/downvote, save/unsave, subscribe/unsubscribe, comment (with 1.5-4s rate-limit delay)
+- ✍️ **Create posts** — save text/link **drafts** headlessly (`rdt post --draft`); publish text/link/image posts with a browser reCAPTCHA token (`--recaptcha-token`) or automatic solving via solvecaptcha.com
 - 🛡️ **Anti-detection** — consistent Chrome 133 fingerprint, `sec-ch-ua` alignment, Gaussian jitter, exponential backoff
 - 📊 **Structured output** — `--yaml`, `--json`, `--output FILE`, `--compact`, `--full-text`
 - 📦 **Stable envelope** — see [SCHEMA.md](./SCHEMA.md) for `ok/schema_version/data/error`
@@ -80,6 +81,7 @@ rdt all                               # /r/all
 rdt sub python                        # Browse subreddit
 rdt sub programming -s top -t week    # Sort + time filter
 rdt sub-info python                   # Subreddit info (subscribers, etc.)
+rdt rules python                      # Subreddit rules
 rdt user spez                         # User profile
 rdt user-posts spez                   # User's submitted posts
 rdt user-comments spez                # User's comments
@@ -120,7 +122,63 @@ rdt save 3 --undo                     # Unsave
 rdt subscribe python                  # Subscribe to r/python
 rdt subscribe python --undo           # Unsubscribe
 rdt comment 3 "Great post!"           # Comment on result #3
+rdt delete 1abc123 -y                 # Delete your own post (t1_… for comments)
+
+# ─── Create posts (require login) ─────────────────
+# Drafts save headlessly. Publishing is gated behind reCAPTCHA Enterprise:
+# either pass --recaptcha-token from a browser (single-use, ~2 min), or set
+# RDT_SOLVECAPTCHA_API_KEY (or APIKEY_SOLVECAPTCHA) and a token is bought from
+# solvecaptcha.com automatically right before publishing (paid, ~10-60s).
+rdt post python "WIP title" --text "Hello **world**" --draft   # Save a text draft
+rdt post news "Cool read" --url https://example.com --draft    # Save a link draft
+rdt post python "Title" --text "body" --recaptcha-token <tok>  # Publish text post
+rdt post pics "My cat" --image cat.jpg                         # Publish image (captcha auto-solved)
+rdt post u_yourname "On my profile" --text "hi"                # Publish to profile
+rdt post python "Guide" --text "step 1 ![img] done" --embed step1.jpg  # Inline image in a text post
+rdt post python "Report" --text "summary **md**" --image chart.png     # Text post + attached image
+rdt flairs askscience                                          # List post flair templates (id + text)
+rdt post askscience "Q" --text "…" --flair-id <template-id>    # Publish with flair (some subs require it)
 ```
+
+> **Post flair (live-verified):** some communities require flair. `rdt flairs
+> <subreddit>` lists the templates; pass the id via `--flair-id` when
+> publishing (plus `--flair-text` to override text-editable templates).
+> Publish-only, community posts only. Careful: a template with empty default
+> text still applies without `--flair-text`, but renders as a blank
+> (invisible) label — the listing flags such templates.
+
+> **Attached image in a text post:** `--text` + `--image` publishes a markdown
+> text post with the image attached (`image.url` in the mutation input): it
+> renders after the body, uncaptioned. The body stays markdown, so formatting
+> works — markdown just can't *inline* images; for that use `--embed`.
+>
+> **Feed visibility trade-off (live-verified):** an attached image is the
+> post's preview media, so it shows on feed/list cards too. Inline (`--embed`)
+> images are body content only — feed cards show just the text preview, and
+> the images appear only once the post is opened. Pick `--image` for feed
+> visibility, `--embed` for placement and captions. Combining `--embed` with
+> `--image` gives both (live-verified): the feed card shows the attached image
+> (inline embeds stay feed-hidden), and the opened post shows the inline
+> embeds in place *plus* the attachment after the body — so attach a distinct
+> image unless you want it appearing twice in the post.
+
+> **Inline images in text posts:** each `--embed FILE` uploads an image and
+> replaces one `![img]` marker in `--text` (markers are substituted in order).
+> On publish, the body is sent editor-style as RTJSON (`content.richText`,
+> *instead of* markdown — Reddit stores the RTJSON canonically and derives the
+> markdown export from it): New Reddit renders each marker as a real inline
+> image block (caption = file name). The RTJSON body is plain text, so keep
+> `--text` unformatted when embedding — markdown syntax would show literally.
+> Drafts are markdown-only, so embeds there stay links to the Reddit-hosted
+> image (`https://i.redd.it/<id>.<ext>`, which serves unsigned —
+> `preview.redd.it` URLs don't).
+
+> **Note:** Reddit drafts store text/link only — not images (image drafts aren't
+> supported by Reddit). Publishing any post requires a reCAPTCHA Enterprise
+> token: capture one from a browser, or let rdt-cli buy one via
+> [Solvecaptcha](https://solvecaptcha.com) — set `RDT_SOLVECAPTCHA_API_KEY` or
+> `APIKEY_SOLVECAPTCHA` (its 2captcha-compatible API is called directly over
+> httpx, so no extra dependencies). Each solve is a paid API call (~10-60s).
 
 ## Authentication
 
@@ -149,6 +207,21 @@ After any listing command such as `feed`, `popular`, `all`, `sub`, or `search`, 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OUTPUT` | `auto` | Output format: `json`, `yaml`, `rich`, or `auto` (→ YAML when non-TTY) |
+| `RDT_SOLVECAPTCHA_API_KEY` | — | Solvecaptcha API key — enables automatic reCAPTCHA solving when publishing posts |
+| `APIKEY_SOLVECAPTCHA` | — | Fallback for the above (solvecaptcha-python's own convention) |
+
+## Config File
+
+`~/.config/rdt-cli/config.json` (optional) — settings applied when no env var overrides them:
+
+```json
+{
+  "solvecaptcha_api_key": "your-solvecaptcha-key"
+}
+```
+
+Solvecaptcha key priority: `RDT_SOLVECAPTCHA_API_KEY` → `APIKEY_SOLVECAPTCHA` → config file.
+A missing or invalid file is ignored silently.
 
 ## Rate Limiting & Anti-Detection
 
@@ -210,16 +283,19 @@ rdt_cli/
 ├── cli.py                # Click entry point & command registration
 ├── client.py             # Reddit API client (rate-limit, retry, anti-detection)
 ├── auth.py               # Cookie authentication + TTL refresh
+├── captcha.py            # reCAPTCHA Enterprise solving via the Solvecaptcha API
 ├── constants.py          # URLs, headers, sort options
 ├── exceptions.py         # Error hierarchy (6 exception types)
 ├── index_cache.py        # Short-index cache for show/open commands
+├── richtext.py           # RTJSON document building (inline images in self-posts)
 └── commands/
     ├── _common.py        # Shared helpers (envelope, output routing, formatters)
     ├── auth.py           # login, logout, status, whoami
-    ├── browse.py         # feed, popular, all, sub, sub-info, user, user-posts, user-comments, saved, upvoted, open
+    ├── browse.py         # feed, popular, all, sub, sub-info, rules, user, user-posts, user-comments, saved, upvoted, open
     ├── post.py           # read, show
     ├── search.py         # search, export
-    └── social.py         # upvote, save, subscribe, comment
+    ├── social.py         # upvote, save, subscribe, comment, delete
+    └── submit.py         # post (text/link/image, drafts)
 ```
 
 ## Development
@@ -334,6 +410,7 @@ rdt all                               # /r/all
 rdt sub python                        # 浏览子版块
 rdt sub programming -s top -t week    # 排序 + 时间过滤
 rdt sub-info python                   # 子版块信息
+rdt rules python                      # 子版块规则
 rdt user spez                         # 用户资料
 rdt user-posts spez                   # 用户发帖
 rdt user-comments spez                # 用户评论
@@ -357,6 +434,7 @@ rdt upvote 3                          # 点赞
 rdt save 3                            # 收藏
 rdt subscribe python                  # 订阅
 rdt comment 3 "Great post!"           # 评论
+rdt delete 1abc123 -y                 # 删除自己的帖子/评论
 ```
 
 ## 认证策略

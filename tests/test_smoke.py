@@ -143,6 +143,20 @@ class TestSubInfo:
 
 
 @smoke
+class TestRules:
+    def test_rules(self):
+        result = _invoke("rules", "python")
+        assert result.exit_code == 0
+
+    def test_rules_json(self):
+        result, data = _invoke_json("rules", "python")
+        assert result.exit_code == 0
+        if data:
+            inner = data.get("data", data)
+            assert "rules" in inner
+
+
+@smoke
 class TestUser:
     def test_user_profile(self):
         result = _invoke("user", "spez")

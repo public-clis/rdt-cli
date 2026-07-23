@@ -3,21 +3,38 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
+import uuid
+from pathlib import Path
 from typing import Any
+
+import httpx
 
 from .config import DEFAULT_CONFIG, RuntimeConfig
 from .constants import (
     ALL_URL,
+    BASE_URL,
     COMMENT_URL,
     DEFAULT_LIMIT,
+    DEL_URL,
+    GRAPHQL_URL,
     HOME_URL,
+    IMAGE_MIME_TO_EXT,
+    IMAGE_MIME_TYPES,
+    MEDIA_CDN_HOST,
+    MEDIA_S3_HOST,
     MORECHILDREN_URL,
+    OP_CREATE_DRAFT,
+    OP_CREATE_POST,
+    OP_CREATE_PROFILE_POST,
+    OP_MEDIA_LEASE,
     POPULAR_URL,
     POST_COMMENTS_SHORT_URL,
     POST_COMMENTS_URL,
     SAVE_URL,
     SEARCH_URL,
     SUBREDDIT_ABOUT_URL,
+    SUBREDDIT_RULES_URL,
     SUBREDDIT_SEARCH_URL,
     SUBSCRIBE_URL,
     SUBSCRIPTIONS_URL,
@@ -34,7 +51,7 @@ from .exceptions import (
 )
 from .fingerprint import BrowserFingerprint
 from .session import SessionState
-from .transports import ReadTransport, WriteTransport
+from .transports import SSL_CONTEXT, ReadTransport, WriteTransport
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +213,25 @@ class RedditClient:
         data = self._get(SUBREDDIT_ABOUT_URL.format(subreddit=subreddit), params={"raw_json": 1})
         return data.get("data", data)
 
+    def get_subreddit_rules(self, subreddit: str) -> dict:
+        """Get subreddit rules (``about/rules.json``).
+
+        Returns the raw response: ``rules`` (community rules, each with
+        ``short_name``, ``description``, ``kind``), plus Reddit-wide
+        ``site_rules``.
+        """
+        return self._get(SUBREDDIT_RULES_URL.format(subreddit=subreddit), params={"raw_json": 1})
+
+    def get_link_flairs(self, subreddit: str) -> list[dict[str, Any]]:
+        """List a subreddit's post flair templates (``link_flair_v2.json``).
+
+        Returns the raw template list (``id``, ``text``, ``text_editable``, …)
+        for use with post flair selection. Needs auth cookies; communities
+        that disallow user flair selection respond 403.
+        """
+        data = self._get(f"/r/{subreddit}/api/link_flair_v2.json", params={"raw_json": 1})
+        return data if isinstance(data, list) else []
+
     # ── Post / Comments ─────────────────────────────────────────────
 
     def get_post_comments(
@@ -343,6 +379,10 @@ class RedditClient:
         """Unsave a post or comment."""
         return self._post(UNSAVE_URL, data={"id": fullname})
 
+    def delete_item(self, fullname: str) -> dict:
+        """Delete your own post (t3_*) or comment (t1_*). Irreversible."""
+        return self._post(DEL_URL, data={"id": fullname})
+
     def subscribe(self, subreddit: str, action: str = "sub") -> dict:
         """Subscribe or unsubscribe. action: 'sub' or 'unsub'."""
         return self._post(SUBSCRIBE_URL, data={"sr_name": subreddit, "action": action})
@@ -350,6 +390,223 @@ class RedditClient:
     def post_comment(self, parent_fullname: str, text: str) -> dict:
         """Post a comment."""
         return self._post(COMMENT_URL, data={"parent": parent_fullname, "text": text})
+
+    # ── Post creation (GraphQL) ─────────────────────────────────────
+
+    def _graphql(self, operation: str, variables: dict[str, Any]) -> Any:
+        """POST a shreddit GraphQL operation and return its ``data`` payload.
+
+        Sends ``{operation, variables, csrf_token}`` as JSON. The csrf_token is
+        echoed into the write transport's cookie jar so cookie == body (Reddit's
+        double-submit CSRF). Raises RedditApiError on GraphQL-level errors.
+        """
+        if self._write_transport is None:
+            raise RuntimeError("Client not initialized. Use 'with RedditClient() as client:'")
+        token = self.session.ensure_csrf_token()
+        self._write_transport.client.cookies.set("csrf_token", token)
+        payload = {"operation": operation, "variables": variables, "csrf_token": token}
+        result = self._write_request("POST", GRAPHQL_URL, json=payload)
+        if isinstance(result, dict) and result.get("errors"):
+            errors = result["errors"]
+            msg = "; ".join(
+                e.get("message", str(e)) if isinstance(e, dict) else str(e) for e in errors
+            ) or str(errors)
+            raise RedditApiError(f"GraphQL {operation} failed: {msg}")
+        if isinstance(result, dict):
+            return result.get("data", result)
+        return result
+
+    @staticmethod
+    def _markdown_content(body: str | None) -> dict[str, Any]:
+        """Content payload for a markdown body (empty dict for no body)."""
+        return {"markdown": body} if body else {}
+
+    def resolve_subreddit_id(self, subreddit: str) -> str:
+        """Resolve a subreddit name to its ``t5_`` fullname (for GraphQL input)."""
+        about = self.get_subreddit_about(subreddit)
+        sub_id = about.get("name") if isinstance(about, dict) else None
+        if not sub_id:
+            raise RedditApiError(f"Could not resolve subreddit r/{subreddit}")
+        return sub_id
+
+    def create_media_lease(self, mimetype_token: str) -> dict[str, Any]:
+        """Request an S3 upload lease for an image (``mimetype_token`` e.g. 'JPEG')."""
+        data = self._graphql(OP_MEDIA_LEASE, {"input": {"mimetype": mimetype_token}})
+        lease = data.get("createMediaUploadLease") if isinstance(data, dict) else None
+        if not isinstance(lease, dict) or not lease.get("uploadLease"):
+            raise RedditApiError("Media lease request returned no upload lease")
+        return lease
+
+    def upload_image(self, path: str) -> str:
+        """Upload an image to Reddit's S3 and return its media asset id.
+
+        Flow: lease (GraphQL) → multipart POST to the S3 URL from the lease
+        (lease fields verbatim + ``file`` last, no reddit cookies) → mediaId.
+        """
+        file_path = Path(path)
+        if not file_path.is_file():
+            raise RedditApiError(f"Image file not found: {path}")
+        content_type, _ = mimetypes.guess_type(file_path.name)
+        if content_type not in IMAGE_MIME_TYPES:
+            raise RedditApiError(
+                f"Unsupported image type for {path} (allowed: {', '.join(sorted(IMAGE_MIME_TYPES))})"
+            )
+        token = content_type.split("/")[-1].upper()  # image/jpeg → JPEG
+
+        lease = self.create_media_lease(token)
+        upload_lease = lease["uploadLease"]
+        upload_url = upload_lease["uploadLeaseUrl"]
+        if upload_url.startswith("//"):
+            upload_url = "https:" + upload_url
+        fields = {h["header"]: h["value"] for h in upload_lease.get("uploadLeaseHeaders", [])}
+        media_id = lease.get("mediaId")
+        if not media_id:
+            raise RedditApiError("Media lease did not return a mediaId")
+
+        # Separate client: cross-site S3 host, must NOT carry reddit cookies.
+        headers = {
+            "User-Agent": self._fingerprint.user_agent,
+            "Origin": BASE_URL,
+            "Referer": f"{BASE_URL}/",
+        }
+        with httpx.Client(
+            follow_redirects=True, timeout=httpx.Timeout(self._timeout), verify=SSL_CONTEXT
+        ) as s3:
+            resp = s3.post(
+                upload_url,
+                data=fields,
+                files={"file": (file_path.name, file_path.read_bytes(), content_type)},
+                headers=headers,
+            )
+        if resp.status_code not in (200, 201):
+            raise RedditApiError(f"Image upload failed (HTTP {resp.status_code})")
+        return media_id
+
+    def upload_image_as_embed(self, path: str) -> tuple[str, str]:
+        """Upload an image for embedding in a self-post body; return (media_id, cdn_url).
+
+        The media id goes into an RTJSON ``img`` node (renders as a real inline
+        image on New Reddit); the CDN URL is the markdown fallback link target:
+        ``https://i.redd.it/<mediaId>.<ext>`` serves unsigned (unlike
+        ``preview.redd.it`` URLs, whose ``s=`` param is a signature).
+        """
+        media_id = self.upload_image(path)
+        content_type, _ = mimetypes.guess_type(Path(path).name)
+        ext = IMAGE_MIME_TO_EXT.get(content_type or "", "jpg")
+        return media_id, f"{MEDIA_CDN_HOST}/{media_id}.{ext}"
+
+    def create_post(
+        self,
+        subreddit_name: str,
+        title: str,
+        *,
+        recaptcha_token: str,
+        kind: str = "self",
+        body: str | None = None,
+        url: str | None = None,
+        media_id: str | None = None,
+        rich_text: str | None = None,
+        flair_id: str | None = None,
+        flair_text: str | None = None,
+        nsfw: bool = False,
+        spoiler: bool = False,
+        is_profile: bool = False,
+    ) -> Any:
+        """Publish a post (subreddit ``CreatePost`` / profile ``CreateProfilePost``).
+
+        Reddit gates post submission behind **reCAPTCHA Enterprise** (invisible,
+        score-based, action ``post_submit``). ``recaptcha_token`` MUST be a fresh
+        token obtained from a browser (single-use, ~2 min TTL) — it cannot be
+        produced headlessly, so this call fails without one. Field shapes come
+        from captured live requests (deviating from them 500s):
+        the subreddit is addressed by **name** (``subredditName`` — not the
+        ``t5_`` id, which drafts use), there is **no** ``postType`` field, and
+        ``isCommercialCommunication``/``targetLanguage`` are always sent.
+        Kind-specific fields: self→``content.markdown``|``content.richText``,
+        link→``url``, image→``gallery.items[].mediaId`` (subreddit) or
+        ``image.url`` (profile). A self-post may also carry ``media_id``: the
+        image is attached via ``image.url`` (both targets — captured subreddit
+        traffic attaches this way too, not via gallery) and renders after the
+        body, uncaptioned.
+
+        For self-posts, ``rich_text`` (stringified RTJSON, see rdt_cli.richtext)
+        replaces the markdown: ``content`` carries exactly one representation,
+        and the fancy-pants editor always submits ``content.richText`` alone
+        (captured live requests never pair it with markdown). Reddit stores the
+        RTJSON canonically and derives the markdown export from it, so ``body``
+        is ignored when ``rich_text`` is given. RTJSON is the only way to get
+        true inline image blocks — a markdown body renders image links as links.
+
+        ``flair_id`` (a template id from :meth:`get_link_flairs`) attaches post
+        flair, with ``flair_text`` overriding the text for editable templates.
+        Community posts only. Confirmed live: the template id and text land on
+        the post (``link_flair_template_id``/``link_flair_text``). A template
+        with empty default text needs ``flair_text``, else the applied flair
+        renders as a blank label.
+        """
+        if kind == "self":
+            content = {"richText": rich_text} if rich_text else self._markdown_content(body)
+        else:
+            content = {}
+        inp: dict[str, Any] = {
+            "title": title,
+            "isNsfw": bool(nsfw),
+            "isSpoiler": bool(spoiler),
+            "content": content,
+            "isCommercialCommunication": False,
+            "targetLanguage": "",
+            "recaptchaToken": recaptcha_token,
+            "correlationId": str(uuid.uuid4()),
+        }
+        if kind == "self" and media_id:
+            inp["image"] = {"url": f"{MEDIA_S3_HOST}/{media_id}"}
+        elif kind == "link":
+            inp["url"] = url
+        if is_profile:
+            if kind == "image":
+                inp["image"] = {"url": f"{MEDIA_S3_HOST}/{media_id}"}
+            return self._graphql(OP_CREATE_PROFILE_POST, {"input": inp})
+
+        inp["subredditName"] = subreddit_name.removeprefix("r/")
+        if flair_id:
+            flair: dict[str, Any] = {"id": flair_id}
+            if flair_text:
+                flair["text"] = flair_text
+            inp["flair"] = flair
+        if kind == "image":
+            inp["gallery"] = {"items": [{"mediaId": media_id}]}
+        return self._graphql(OP_CREATE_POST, {"input": inp})
+
+    def create_draft(
+        self,
+        subreddit_id: str,
+        title: str,
+        *,
+        body: str | None = None,
+        url: str | None = None,
+        nsfw: bool = False,
+        spoiler: bool = False,
+    ) -> Any:
+        """Save a post draft via ``CreateDraft`` (text or link — no captcha needed).
+
+        Reddit drafts store text (markdown) or a link URL only; they cannot hold
+        images (the draft input type has no media field). Text is confirmed live;
+        the link shape is best-effort.
+        """
+        inp: dict[str, Any] = {
+            "subredditId": subreddit_id,
+            "title": title,
+            "isNsfw": bool(nsfw),
+            "isSpoiler": bool(spoiler),
+        }
+        if url:
+            inp["kind"] = "LINK"
+            inp["url"] = url
+            inp["content"] = {}
+        else:
+            inp["kind"] = "MARKDOWN"
+            inp["content"] = self._markdown_content(body)
+        return self._graphql(OP_CREATE_DRAFT, {"input": inp})
 
     # ── Subscription feed ───────────────────────────────────────────
 
