@@ -92,6 +92,8 @@ Payloads live under `.data`.
 | `rdt user-comments <name>` | View user's comments | `rdt user-comments spez -n 5 --json` |
 | `rdt saved` | View your saved items | `rdt saved -n 10 --json` |
 | `rdt upvoted` | View your upvoted posts | `rdt upvoted -n 10 --json` |
+| `rdt custom-feeds` | List your custom feeds (multis) | `rdt custom-feeds --json` |
+| `rdt custom-feed <name>` | Browse posts from custom feed | `rdt custom-feed dev -s hot -n 10` |
 | `rdt open <id_or_index>` | Open post in browser | `rdt open 3` |
 
 ### Reading
@@ -124,7 +126,16 @@ Payloads live under `.data`.
 | `rdt save <id> --undo` | Unsave | `rdt save 3 --undo` |
 | `rdt subscribe <sub>` | Subscribe | `rdt subscribe python` |
 | `rdt subscribe <sub> --undo` | Unsubscribe | `rdt subscribe python --undo` |
-| `rdt comment <id> <text>` | Post a comment | `rdt comment 3 "Great post!"` |
+### Custom Feeds (require auth)
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `rdt custom-feeds` | List your custom feeds (multis) | `rdt custom-feeds --json` |
+| `rdt custom-feed <name>` | Browse posts from custom feed | `rdt custom-feed dev -s hot -n 10` |
+| `rdt custom-feed-add <name> <sub>` | Add subreddit to custom feed | `rdt custom-feed-add dev golang` |
+| `rdt custom-feed-remove <name> <sub>` | Remove subreddit from custom feed | `rdt custom-feed-remove dev golang` |
+| `rdt custom-feed-create <name>` | Create a new custom feed | `rdt custom-feed-create tech -s python,rust` |
+| `rdt custom-feed-delete <name>` | Delete a custom feed | `rdt custom-feed-delete tech -y` |
 
 ### Account
 
