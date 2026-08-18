@@ -972,3 +972,137 @@ class TestReadCompact:
         assert result.exit_code == 0
         assert "--compact" in result.output
 
+
+class TestCustomFeeds:
+    """Tests for custom-feeds and custom-feed commands."""
+
+    def _mock_custom_feeds(self):
+        return [
+            {
+                "data": {
+                    "name": "dev",
+                    "display_name": "Dev",
+                    "path": "/user/example_user/m/dev",
+                    "subreddits": [{"name": "python"}, {"name": "rust"}],
+                }
+            }
+        ]
+
+    def _mock_listing(self):
+        return {
+            "data": {
+                "children": [
+                    {
+                        "data": {
+                            "id": "abc123",
+                            "title": "Custom Feed Post",
+                            "subreddit": "python",
+                            "author": "dev_user",
+                            "score": 42,
+                            "num_comments": 5,
+                            "created_utc": 1700000000.0,
+                            "permalink": "/r/python/comments/abc123/test/",
+                            "url": "https://reddit.com/r/python/comments/abc123/test/",
+                            "is_self": True,
+                            "selftext": "Content",
+                            "over_18": False,
+                            "is_video": False,
+                            "stickied": False,
+                        }
+                    }
+                ],
+                "after": None,
+            }
+        }
+
+    def test_custom_feeds_json(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.get_custom_feeds", return_value=self._mock_custom_feeds()):
+                result = runner.invoke(cli, ["custom-feeds", "--json"])
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                assert data["ok"] is True
+                assert len(data["data"]) == 1
+                assert data["data"][0]["name"] == "dev"
+                assert data["data"][0]["subreddits"] == ["python", "rust"]
+
+    def test_custom_feed_json(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.get_custom_feed", return_value=self._mock_listing()):
+                result = runner.invoke(cli, ["custom-feed", "dev", "--json"])
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                assert data["ok"] is True
+                assert data["data"]["data"]["children"][0]["data"]["title"] == "Custom Feed Post"
+
+    def test_custom_feed_compact_json(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.get_custom_feed", return_value=self._mock_listing()):
+                result = runner.invoke(cli, ["custom-feed", "dev", "--compact", "--json"])
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                assert data["ok"] is True
+                assert len(data["data"]) == 1
+                assert data["data"][0]["title"] == "Custom Feed Post"
+
+    def test_custom_feed_add(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.validate_session", return_value={"authenticated": True}):
+                with patch("rdt_cli.client.RedditClient.add_to_custom_feed", return_value={}) as mock_add:
+                    with patch("rdt_cli.commands._common.write_delay"):
+                        result = runner.invoke(cli, ["custom-feed-add", "dev", "golang"])
+                        assert result.exit_code == 0
+                        assert "Added" in result.output
+                        mock_add.assert_called_once_with("dev", "golang")
+
+    def test_custom_feed_remove(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.validate_session", return_value={"authenticated": True}):
+                with patch("rdt_cli.client.RedditClient.remove_from_custom_feed", return_value={}) as mock_rm:
+                    with patch("rdt_cli.commands._common.write_delay"):
+                        result = runner.invoke(cli, ["custom-feed-remove", "dev", "golang"])
+                        assert result.exit_code == 0
+                        assert "Removed" in result.output
+                        mock_rm.assert_called_once_with("dev", "golang")
+
+    def test_custom_feed_create(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.validate_session", return_value={"authenticated": True}):
+                with patch("rdt_cli.client.RedditClient.create_custom_feed", return_value={}) as mock_create:
+                    with patch("rdt_cli.commands._common.write_delay"):
+                        result = runner.invoke(cli, ["custom-feed-create", "tech", "--subreddits", "python,rust"])
+                        assert result.exit_code == 0
+                        assert "Created custom feed" in result.output
+                        mock_create.assert_called_once_with(
+                            feed_name="tech",
+                            display_name=None,
+                            description="",
+                            visibility="private",
+                            subreddits=["python", "rust"],
+                        )
+
+    def test_custom_feed_delete(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.validate_session", return_value={"authenticated": True}):
+                with patch("rdt_cli.client.RedditClient.delete_custom_feed", return_value={}) as mock_del:
+                    with patch("rdt_cli.commands._common.write_delay"):
+                        result = runner.invoke(cli, ["custom-feed-delete", "tech", "-y"])
+                        assert result.exit_code == 0
+                        assert "Deleted custom feed" in result.output
+                        mock_del.assert_called_once_with("tech")
+
+

@@ -85,6 +85,8 @@ rdt user-posts spez                   # User's submitted posts
 rdt user-comments spez                # User's comments
 rdt saved                             # Your saved posts/items
 rdt upvoted                           # Your upvoted posts
+rdt custom-feeds                      # List your custom feeds (multis)
+rdt custom-feed dev -s hot            # Browse posts from custom feed
 
 # Short index works after list commands (feed/popular/sub/search)
 rdt sub python
@@ -120,6 +122,14 @@ rdt save 3 --undo                     # Unsave
 rdt subscribe python                  # Subscribe to r/python
 rdt subscribe python --undo           # Unsubscribe
 rdt comment 3 "Great post!"           # Comment on result #3
+
+# ─── Custom Feeds (require login) ─────────────
+rdt custom-feeds                      # List your custom feeds
+rdt custom-feed dev -s hot            # Browse posts in custom feed
+rdt custom-feed-add dev golang        # Add r/golang to custom feed
+rdt custom-feed-remove dev golang     # Remove r/golang from custom feed
+rdt custom-feed-create tech -s rust   # Create custom feed
+rdt custom-feed-delete tech -y        # Delete custom feed
 ```
 
 ## Authentication

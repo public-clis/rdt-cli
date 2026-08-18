@@ -444,6 +444,173 @@ def upvoted(
     )
 
 
+# ── custom-feeds / custom-feed ──────────────────────────────────────
+
+
+@click.command(name="custom-feeds")
+@structured_output_options
+def custom_feeds(as_json: bool, as_yaml: bool) -> None:
+    """List your custom feeds (multireddits)"""
+    from ._common import exit_for_error, run_client_action
+
+    cred = require_auth()
+
+    def _render(raw_data: list) -> None:
+        table = Table(title="📑 Custom Feeds", show_lines=True)
+        table.add_column("Name", style="bold cyan")
+        table.add_column("Display Name", style="green")
+        table.add_column("Subreddits", style="dim")
+        table.add_column("Path", style="dim")
+
+        for item in raw_data:
+            d = item.get("data", {})
+            name = d.get("name", "")
+            display_name = d.get("display_name", "")
+            subs = [s.get("name", "") for s in d.get("subreddits", [])]
+            sub_str = f"{len(subs)} subs ({', '.join(subs[:5])}{'...' if len(subs) > 5 else ''})"
+            path = d.get("path", "")
+            table.add_row(name, display_name, sub_str, path)
+
+        console.print(table)
+        console.print("\n  [dim]💡 Use [bold]rdt custom-feed <name>[/bold] to browse a custom feed[/dim]")
+
+    try:
+        raw_list = run_client_action(cred, lambda c: c.get_custom_feeds())
+        clean_data = [
+            {
+                "name": it.get("data", {}).get("name"),
+                "display_name": it.get("data", {}).get("display_name"),
+                "path": it.get("data", {}).get("path"),
+                "subreddits": [s.get("name") for s in it.get("data", {}).get("subreddits", [])],
+            }
+            for it in raw_list
+        ]
+        if maybe_print_structured(clean_data, as_json=as_json, as_yaml=as_yaml):
+            return
+        _render(raw_list)
+    except Exception as exc:
+        exit_for_error(exc, as_json=as_json, as_yaml=as_yaml)
+
+
+@click.command(name="custom-feed")
+@click.argument("name")
+@click.option("-s", "--sort", default="hot", type=click.Choice(SORT_OPTIONS), help="Sort order")
+@click.option("-t", "--time", "time_filter", default=None, type=click.Choice(TIME_FILTERS), help="Time filter")
+@click.option("-n", "--limit", default=25, type=int, help="Number of posts (max 100)")
+@click.option("--after", default=None, help="Pagination cursor")
+@listing_options
+def custom_feed(
+    name: str,
+    sort: str, time_filter: str | None, limit: int, after: str | None,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
+) -> None:
+    """Browse posts from a custom feed (multireddit)"""
+    cred = require_auth()
+    _handle_listing(
+        cred,
+        action=lambda c: c.get_custom_feed(
+            feed_name=name,
+            sort=sort,
+            limit=limit,
+            after=after,
+            time_filter=time_filter,
+        ),
+        data_title=f"📑 Custom Feed: {name} ({sort})",
+        next_cmd=f"rdt custom-feed {name} -s {sort}",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
+    )
+
+
+@click.command(name="custom-feed-add")
+@click.argument("name")
+@click.argument("subreddit")
+def custom_feed_add(name: str, subreddit: str) -> None:
+    """Add a subreddit to a custom feed (multireddit)"""
+    from ._common import exit_for_error, write_delay
+
+    cred = require_auth()
+    try:
+        with RedditClient(cred) as client:
+            client.validate_session()
+            client.add_to_custom_feed(name, subreddit)
+        write_delay()
+        console.print(f"[green]✅ Added[/green] r/{subreddit} to custom feed [bold cyan]{name}[/bold cyan]")
+    except Exception as exc:
+        exit_for_error(exc, prefix="Failed to add to custom feed")
+
+
+@click.command(name="custom-feed-remove")
+@click.argument("name")
+@click.argument("subreddit")
+def custom_feed_remove(name: str, subreddit: str) -> None:
+    """Remove a subreddit from a custom feed (multireddit)"""
+    from ._common import exit_for_error, write_delay
+
+    cred = require_auth()
+    try:
+        with RedditClient(cred) as client:
+            client.validate_session()
+            client.remove_from_custom_feed(name, subreddit)
+        write_delay()
+        console.print(f"[green]✅ Removed[/green] r/{subreddit} from custom feed [bold cyan]{name}[/bold cyan]")
+    except Exception as exc:
+        exit_for_error(exc, prefix="Failed to remove from custom feed")
+
+
+@click.command(name="custom-feed-create")
+@click.argument("name")
+@click.option("--display-name", default=None, help="Display name of custom feed")
+@click.option("--description", default="", help="Description text")
+@click.option("--public", "visibility", flag_value="public", help="Make feed public")
+@click.option("--private", "visibility", flag_value="private", default=True, help="Make feed private (default)")
+@click.option("-s", "--subreddits", default="", help="Comma-separated list of initial subreddits")
+def custom_feed_create(
+    name: str, display_name: str | None, description: str, visibility: str, subreddits: str
+) -> None:
+    """Create a new custom feed (multireddit)"""
+    from ._common import exit_for_error, write_delay
+
+    cred = require_auth()
+    sub_list = [s.strip() for s in subreddits.split(",") if s.strip()]
+    try:
+        with RedditClient(cred) as client:
+            client.validate_session()
+            client.create_custom_feed(
+                feed_name=name,
+                display_name=display_name,
+                description=description,
+                visibility=visibility,
+                subreddits=sub_list,
+            )
+        write_delay()
+        console.print(f"[green]✅ Created custom feed[/green] [bold cyan]{name}[/bold cyan] ({visibility})")
+    except Exception as exc:
+        exit_for_error(exc, prefix="Failed to create custom feed")
+
+
+@click.command(name="custom-feed-delete")
+@click.argument("name")
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt")
+def custom_feed_delete(name: str, yes: bool) -> None:
+    """Delete a custom feed (multireddit)"""
+    from ._common import exit_for_error, write_delay
+
+    cred = require_auth()
+    if not yes and not click.confirm(f"Are you sure you want to delete custom feed '{name}'?"):
+        console.print("[dim]Cancelled[/dim]")
+        return
+    try:
+        with RedditClient(cred) as client:
+            client.validate_session()
+            client.delete_custom_feed(name)
+        write_delay()
+        console.print(f"[green]✅ Deleted custom feed[/green] [bold cyan]{name}[/bold cyan]")
+    except Exception as exc:
+        exit_for_error(exc, prefix="Failed to delete custom feed")
+
+
 # ── open ────────────────────────────────────────────────────────────
 
 

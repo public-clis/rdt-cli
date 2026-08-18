@@ -52,6 +52,12 @@ cli.add_command(browse.user_posts)
 cli.add_command(browse.user_comments)
 cli.add_command(browse.saved)
 cli.add_command(browse.upvoted)
+cli.add_command(browse.custom_feeds)
+cli.add_command(browse.custom_feed)
+cli.add_command(browse.custom_feed_add)
+cli.add_command(browse.custom_feed_remove)
+cli.add_command(browse.custom_feed_create)
+cli.add_command(browse.custom_feed_delete)
 cli.add_command(browse.open_post)
 
 # ─── Post commands ───────────────────────────────────────────────────

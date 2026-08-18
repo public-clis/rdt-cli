@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -132,6 +133,14 @@ class RedditClient:
     def _post(self, url: str, data: dict[str, Any] | None = None) -> Any:
         """POST request."""
         return self._write_request("POST", url, data=data)
+
+    def _put(self, url: str, data: dict[str, Any] | None = None) -> Any:
+        """PUT request."""
+        return self._write_request("PUT", url, data=data)
+
+    def _delete(self, url: str, data: dict[str, Any] | None = None, params: dict[str, Any] | None = None) -> Any:
+        """DELETE request."""
+        return self._write_request("DELETE", url, data=data, params=params)
 
     # ── Listing helpers ─────────────────────────────────────────────
 
@@ -417,3 +426,80 @@ class RedditClient:
         )
 
         return {"data": {"children": all_posts, "after": None}}
+
+    # ── Custom feeds (multireddits) ─────────────────────────────────
+
+    def get_custom_feeds(self) -> list[dict]:
+        """Get user's custom feeds (multireddits)."""
+        data = self._get("/api/multi/mine.json", params={"raw_json": 1})
+        if isinstance(data, list):
+            return data
+        return []
+
+    def get_custom_feed(
+        self,
+        feed_name: str,
+        username: str | None = None,
+        sort: str = "hot",
+        limit: int = DEFAULT_LIMIT,
+        after: str | None = None,
+        time_filter: str | None = None,
+    ) -> dict:
+        """Get listing for a custom feed (multireddit)."""
+        user = username or self.session.username or "me"
+        url = (
+            f"/user/{user}/m/{feed_name}.json"
+            if sort == "hot"
+            else f"/user/{user}/m/{feed_name}/{sort}.json"
+        )
+        params: dict[str, Any] = {"limit": limit, "raw_json": 1}
+        if after:
+            params["after"] = after
+        if time_filter and sort in ("top", "controversial"):
+            params["t"] = time_filter
+        return self._get(url, params=params)
+
+    def add_to_custom_feed(
+        self, feed_name: str, subreddit: str, username: str | None = None,
+    ) -> dict:
+        """Add a subreddit to a custom feed (multireddit)."""
+        user = username or self.session.username or "me"
+        url = f"/api/multi/user/{user}/m/{feed_name}/r/{subreddit}"
+        return self._put(url, data={"model": json.dumps({"name": subreddit})})
+
+    def remove_from_custom_feed(
+        self, feed_name: str, subreddit: str, username: str | None = None,
+    ) -> dict:
+        """Remove a subreddit from a custom feed (multireddit)."""
+        user = username or self.session.username or "me"
+        url = f"/api/multi/user/{user}/m/{feed_name}/r/{subreddit}"
+        return self._delete(url)
+
+    def create_custom_feed(
+        self,
+        feed_name: str,
+        display_name: str | None = None,
+        description: str = "",
+        visibility: str = "private",
+        subreddits: list[str] | None = None,
+        username: str | None = None,
+    ) -> dict:
+        """Create or update a custom feed (multireddit)."""
+        user = username or self.session.username or "me"
+        url = f"/api/multi/user/{user}/m/{feed_name}"
+        sub_list = [{"name": s} for s in (subreddits or [])]
+        model = {
+            "display_name": display_name or feed_name,
+            "description_md": description,
+            "visibility": visibility,
+            "subreddits": sub_list,
+        }
+        return self._post(url, data={"model": json.dumps(model)})
+
+    def delete_custom_feed(
+        self, feed_name: str, username: str | None = None,
+    ) -> dict:
+        """Delete an entire custom feed (multireddit)."""
+        user = username or self.session.username or "me"
+        url = f"/api/multi/user/{user}/m/{feed_name}"
+        return self._delete(url)
