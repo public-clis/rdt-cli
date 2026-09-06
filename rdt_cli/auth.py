@@ -15,7 +15,7 @@ import subprocess
 import time
 from typing import Any
 
-from .constants import CONFIG_DIR, CREDENTIAL_FILE, REQUIRED_COOKIES
+from .constants import BROWSER_COOKIE_FNS, CONFIG_DIR, CREDENTIAL_FILE, REQUIRED_COOKIES
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,10 @@ def _extract_subprocess() -> Credential | None:
     script = '''
 import browser_cookie3, json
 cookies = {}
-for browser_fn in [browser_cookie3.chrome, browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.brave]:
+for name in ["chromium", "chrome", "firefox", "edge", "brave"]:
+    browser_fn = getattr(browser_cookie3, name, None)
+    if browser_fn is None:
+        continue
     try:
         jar = browser_fn(domain_name=".reddit.com")
         for c in jar:
@@ -178,12 +181,15 @@ def _extract_direct() -> Credential | None:
         logger.warning("browser-cookie3 not available for direct extraction")
         return None
 
-    for fn in [browser_cookie3.chrome, browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.brave]:
+    for name in BROWSER_COOKIE_FNS:
+        fn = getattr(browser_cookie3, name, None)
+        if fn is None:
+            continue
         try:
             jar = fn(domain_name=".reddit.com")
             cookies = {c.name: c.value for c in jar}
             if any(k in cookies for k in REQUIRED_COOKIES):
-                cred = Credential(cookies=cookies, source=f"browser:{fn.__name__}")
+                cred = Credential(cookies=cookies, source=f"browser:{name}")
                 save_credential(cred)
                 return cred
         except Exception:

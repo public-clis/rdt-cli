@@ -183,6 +183,12 @@ class TestConstants:
         from rdt_cli.constants import REQUIRED_COOKIES
         assert "reddit_session" in REQUIRED_COOKIES
 
+    def test_browser_cookie_fns_include_chromium(self):
+        from rdt_cli.constants import BROWSER_COOKIE_FNS
+        assert BROWSER_COOKIE_FNS[0] == "chromium"
+        assert "chrome" in BROWSER_COOKIE_FNS
+        assert "firefox" in BROWSER_COOKIE_FNS
+
     def test_search_sort_options(self):
         from rdt_cli.constants import SEARCH_SORT_OPTIONS
         assert "relevance" in SEARCH_SORT_OPTIONS

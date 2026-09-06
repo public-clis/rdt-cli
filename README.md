@@ -127,7 +127,7 @@ rdt comment 3 "Great post!"           # Comment on result #3
 rdt-cli supports browser cookie extraction to authenticate with Reddit:
 
 1. **Saved cookies** — loads from `~/.config/rdt-cli/credential.json`
-2. **Browser cookies** — auto-detects installed browsers and extracts cookies (supports Chrome, Firefox, Edge, Brave)
+2. **Browser cookies** — auto-detects installed browsers and extracts cookies (supports Chromium, Chrome, Firefox, Edge, Brave)
 
 `rdt login` automatically tries all installed browsers and uses the first one with valid cookies.
 
@@ -364,7 +364,7 @@ rdt comment 3 "Great post!"           # 评论
 rdt-cli 支持浏览器 Cookie 提取来认证 Reddit：
 
 1. **已保存 Cookie** — 从 `~/.config/rdt-cli/credential.json` 加载
-2. **浏览器 Cookie** — 自动检测已安装浏览器并提取（支持 Chrome、Firefox、Edge、Brave）
+2. **浏览器 Cookie** — 自动检测已安装浏览器并提取（支持 Chromium、Chrome、Firefox、Edge、Brave）
 
 Cookie 保存后有效期 **7 天**，超时后自动尝试从浏览器刷新。
 
