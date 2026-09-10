@@ -137,21 +137,18 @@ def extract_browser_credential() -> Credential | None:
 
 def _extract_subprocess() -> Credential | None:
     """Extract via uv subprocess — avoids SQLite lock."""
-    script = '''
-import browser_cookie3, json
-cookies = {}
-for browser_fn in [browser_cookie3.chrome, browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.brave]:
+    script = f"""
+import browser_cookie3 as bc, json
+required = {sorted(REQUIRED_COOKIES)!r}
+for browser_fn in [bc.chrome, bc.chromium, bc.firefox, bc.edge, bc.brave]:
     try:
-        jar = browser_fn(domain_name=".reddit.com")
-        for c in jar:
-            cookies[c.name] = c.value
-        if cookies:
-            break
+        cookies = {{c.name: c.value for c in browser_fn(domain_name=".reddit.com")}}
     except Exception:
         continue
-if cookies:
-    print(json.dumps(cookies))
-'''
+    if any(k in cookies for k in required):
+        print(json.dumps(cookies))
+        break
+"""
     try:
         result = subprocess.run(
             ["uv", "run", "--with", "browser-cookie3", "python3", "-c", script],
@@ -173,12 +170,12 @@ if cookies:
 def _extract_direct() -> Credential | None:
     """Fallback direct extraction (may fail if browser is open)."""
     try:
-        import browser_cookie3
+        import browser_cookie3 as bc
     except ImportError:
         logger.warning("browser-cookie3 not available for direct extraction")
         return None
 
-    for fn in [browser_cookie3.chrome, browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.brave]:
+    for fn in [bc.chrome, bc.chromium, bc.firefox, bc.edge, bc.brave]:
         try:
             jar = fn(domain_name=".reddit.com")
             cookies = {c.name: c.value for c in jar}
