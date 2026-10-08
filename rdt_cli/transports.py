@@ -7,7 +7,9 @@ import random
 import time
 from typing import Any
 
-import httpx
+from curl_cffi import requests as cffi_requests
+from curl_cffi.requests.exceptions import ConnectionError as CffiConnectionError
+from curl_cffi.requests.exceptions import Timeout as CffiTimeout
 
 from .config import RuntimeConfig
 from .constants import BASE_URL
@@ -42,19 +44,20 @@ class BaseTransport:
         self._max_retries = config.max_retries
         self._last_request_time = 0.0
         self._request_count = 0
-        self._http = httpx.Client(
+        self._http = cffi_requests.Session(
             base_url=BASE_URL,
             headers=self.default_headers(),
             cookies=session.cookies,
-            follow_redirects=True,
-            timeout=httpx.Timeout(config.timeout),
+            allow_redirects=True,
+            timeout=config.timeout,
+            impersonate="chrome",
         )
 
     def close(self) -> None:
         self._http.close()
 
     @property
-    def client(self) -> httpx.Client:
+    def client(self) -> cffi_requests.Session:
         return self._http
 
     @property
@@ -74,7 +77,7 @@ class BaseTransport:
                 jitter += random.uniform(2.0, 5.0)
             time.sleep(self._request_delay - elapsed + jitter)
 
-    def _merge_response_cookies(self, resp: httpx.Response) -> None:
+    def _merge_response_cookies(self, resp: cffi_requests.Response) -> None:
         for name, value in resp.cookies.items():
             if not value:
                 continue
@@ -131,7 +134,7 @@ class BaseTransport:
                 if not text.strip():
                     return {}
                 return resp.json()
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            except (CffiTimeout, CffiConnectionError) as exc:
                 last_exc = exc
                 wait = (2**attempt) + random.uniform(0, 1)
                 logger.warning("Network error: %s, retrying in %.1fs", exc, wait)

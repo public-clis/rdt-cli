@@ -22,6 +22,7 @@ dependencies = [
     "click>=8.0",
     "rich>=13.0",
     "httpx>=0.27",
+    "curl_cffi>=0.7",
     "browser-cookie3>=0.19",
     "pyyaml>=6.0",
 ]
