@@ -8,6 +8,7 @@ from typing import Any
 from .config import DEFAULT_CONFIG, RuntimeConfig
 from .constants import (
     ALL_URL,
+    API_FALLBACK_BASE_URL,
     COMMENT_URL,
     DEFAULT_LIMIT,
     HOME_URL,
@@ -30,6 +31,7 @@ from .constants import (
     VOTE_URL,
 )
 from .exceptions import (
+    ForbiddenError,
     RedditApiError,
 )
 from .fingerprint import BrowserFingerprint
@@ -262,7 +264,11 @@ class RedditClient:
         }
         if after:
             params["after"] = after
-        return self._get(url, params=params)
+        try:
+            return self._get(url, params=params)
+        except ForbiddenError:
+            logger.info("search.json blocked, retrying via %s", API_FALLBACK_BASE_URL)
+            return self._get(API_FALLBACK_BASE_URL + url.removesuffix(".json"), params=params)
 
     # ── User ────────────────────────────────────────────────────────
 

@@ -32,6 +32,9 @@ MORECHILDREN_URL = "/api/morechildren.json"
 # Search
 SEARCH_URL = "/search.json"
 SUBREDDIT_SEARCH_URL = "/r/{subreddit}/search.json"
+# Reddit answers 403 for www.reddit.com/search.json; the api. host still serves
+# the same Listing JSON for the same cookies (jackwener/rdt-cli#27).
+API_FALLBACK_BASE_URL = "https://api.reddit.com"
 
 # User
 USER_ABOUT_URL = "/user/{username}/about.json"
